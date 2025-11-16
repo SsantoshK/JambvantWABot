@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${TRAEFIK_EMAIL:-admin@jambvant.com}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - traefik_net
+
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-jambvant_user}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-replace_with_a_strong_password_here}"
+      POSTGRES_DB: "${POSTGRES_DB:-jambvant_db}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - traefik_net
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-jambvant_db}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-jambvant_user}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-replace_with_a_strong_password_here}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-replace_with_a_strong_password_here}
+      - WEBHOOK_URL=${WEBHOOK_URL:-https://jambvant.com}
+      - VUE_APP_URL_BASE_API=${VUE_APP_URL_BASE_API:-https://jambvant.com}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`${TRAEFIK_DOMAIN:-jambvant.com}`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=le"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    networks:
+      - traefik_net
+
+  adminer:
+    image: adminer
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.adminer.rule=Host(`${TRAEFIK_DOMAIN:-jambvant.com}`) && PathPrefix(`/adminer`)"
+      - "traefik.http.routers.adminer.entrypoints=websecure"
+      - "traefik.http.routers.adminer.tls.certresolver=le"
+      - "traefik.http.services.adminer.loadbalancer.server.port=8080"
+    networks:
+      - traefik_net
+
+volumes:
+  postgres_data:
+  n8n_data:
+
+networks:
+  traefik_net:
+    driver: bridge

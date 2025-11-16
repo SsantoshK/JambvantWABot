@@ -1,0 +1,333 @@
+{
+  "name": "Jambvant Hindi Voice Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "jambvant-voice-bot",
+        "responseMode": "onReceived",
+        "httpMethod": "POST"
+      },
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 150]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "sender_phone", "value": "={{ $json.entry[0].changes[0].value.messages[0].from }}" },
+            { "name": "message_id", "value": "={{ $json.entry[0].changes[0].value.messages[0].id }}" },
+            { "name": "message_type", "value": "={{ $json.entry[0].changes[0].value.messages[0].type }}" },
+            { "name": "audio_id", "value": "={{ $json.entry[0].changes[0].value.messages[0].audio.id }}" },
+            { "name": "timestamp", "value": "={{ Date.now() }}" }
+          ]
+        }
+      },
+      "name": "Extract WhatsApp Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message_type }}",
+              "operation": "equal",
+              "value2": "audio"
+            }
+          ]
+        }
+      },
+      "name": "IF Audio",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 150]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "=https://graph.instagram.com/v18.0/{{ $json.audio_id }}",
+        "options": {}
+      },
+      "name": "Get Audio URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [850, 60]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "={{ $json.url }}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1050, 60]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "=https://speech.googleapis.com/v1/speech:recognize?key={{ $env.GOOGLE_API_KEY }}",
+        "options": {},
+        "bodyParametersJson": "={\n  \"config\": {\n    \"encoding\": \"OGG_OPUS\",\n    \"languageCode\": \"hi-IN\",\n    \"model\": \"latest_long\",\n    \"useEnhanced\": true,\n    \"enableAutomaticPunctuation\": true,\n    \"audioChannelCount\": 1\n  },\n  \"audio\": {\n    \"content\": \"={{ $binary.data.data.toString('base64') }}\"\n  }\n}"
+      },
+      "name": "Google STT (hi-IN)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1250, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "hindi_text", "value": "={{ $json.results[0].alternatives[0].transcript }}" },
+            { "name": "stt_confidence", "value": "={{ $json.results[0].alternatives[0].confidence }}" },
+            { "name": "stt_service", "value": "google_cloud" }
+          ],
+          "number": [
+            { "name": "stt_duration_ms", "value": "={{ $json.duration * 1000 }}" }
+          ]
+        }
+      },
+      "name": "Extract STT Results",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1450, 60]
+    },
+    {
+      "parameters": {
+        "operation": "translate",
+        "sourceLanguage": "HI",
+        "targetLanguage": "EN",
+        "text": "={{ $json.hindi_text }}",
+        "options": {}
+      },
+      "name": "DeepL HI→EN",
+      "type": "n8n-nodes-base.deepl",
+      "typeVersion": 1,
+      "position": [1650, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "english_text", "value": "={{ $json.translations[0].text || $json.data?.translations?.[0]?.text }}" }
+          ]
+        }
+      },
+      "name": "Extract English Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1850, 60]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT fact_text_english FROM user_facts WHERE user_id = (SELECT user_id FROM users WHERE phone_number = '{{ $json.sender_phone }}') ORDER BY importance_score DESC LIMIT 5"
+      },
+      "name": "Query User Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2050, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "system_prompt",
+              "value": "=You are Jambvant, an AI assistant for an Indian community in Deoria, UP. User speaks Hindi but this query is translated to English. Respond in clear, empathetic English (will be translated back to Hindi). Be culturally aware and community-focused. Keep responses concise and actionable.\n\nUser Background:\n{{ $json.rows ? $json.rows.map(r => r.fact_text_english).join('\n') : '' }}"
+            },
+            { "name": "user_query", "value": "={{ $json.english_text }}" }
+          ]
+        }
+      },
+      "name": "Build System Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [2250, 60]
+    },
+    {
+      "parameters": {
+        "model": "gpt-5.1-instant",
+        "temperature": 0.7,
+        "maxTokens": 200,
+        "messages": "=[{ \"role\": \"system\", \"content\": \"={{ $json.system_prompt }}\" }, { \"role\": \"user\", \"content\": \"={{ $json.user_query }}\" }]"
+      },
+      "name": "GPT-5.1 Instant",
+      "type": "n8n-nodes-base.openai",
+      "typeVersion": 1,
+      "position": [2450, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "english_response", "value": "={{ $json.choices[0].message.content || $json.choices?.[0]?.text }}" }
+          ],
+          "number": [
+            { "name": "prompt_tokens", "value": "={{ $json.usage?.prompt_tokens || 0 }}" },
+            { "name": "completion_tokens", "value": "={{ $json.usage?.completion_tokens || 0 }}" }
+          ]
+        }
+      },
+      "name": "Extract LLM Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [2650, 60]
+    },
+    {
+      "parameters": {
+        "operation": "translate",
+        "sourceLanguage": "EN",
+        "targetLanguage": "HI",
+        "text": "={{ $json.english_response }}",
+        "options": {}
+      },
+      "name": "DeepL EN→HI",
+      "type": "n8n-nodes-base.deepl",
+      "typeVersion": 1,
+      "position": [2850, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "hindi_response", "value": "={{ $json.translations[0].text || $json.data?.translations?.[0]?.text }}" }
+          ]
+        }
+      },
+      "name": "Extract Hindi Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [3050, 60]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "=https://texttospeech.googleapis.com/v1/text:synthesize?key={{ $env.GOOGLE_API_KEY }}",
+        "bodyParametersJson": "={\n  \"input\": { \"text\": \"={{ $json.hindi_response }}\" },\n  \"voice\": { \"languageCode\": \"hi-IN\", \"name\": \"hi-IN-Neural2-D\", \"ssmlGender\": \"FEMALE\" },\n  \"audioConfig\": { \"audioEncoding\": \"OGG_OPUS\", \"speakingRate\": 0.85 }\n}"
+      },
+      "name": "Google TTS (hi-IN)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [3250, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "audio_content_base64", "value": "={{ $json.audioContent }}" }
+          ]
+        }
+      },
+      "name": "Extract Audio Content",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [3450, 60]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucket": "={{ $env.GCS_BUCKET_NAME || 'jambvant-audio-bucket' }}",
+        "fileName": "=response-{{ $json.message_id }}-{{ Date.now() }}.ogg",
+        "binaryPropertyName": "audio_binary",
+        "makePublic": true
+      },
+      "name": "Upload Audio to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [3650, 60]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "audio_url", "value": "=https://storage.googleapis.com/{{ $env.GCS_BUCKET_NAME || 'jambvant-audio-bucket' }}/{{ $json.fileName || $json.name }}" }
+          ]
+        }
+      },
+      "name": "Construct Public URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [3850, 60]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $env.WHATSAPP_PHONE_ID }}",
+        "toNumber": "={{ $json.sender_phone }}",
+        "type": "audio",
+        "audioUrl": "={{ $json.audio_url }}"
+      },
+      "name": "Send Voice to WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [4050, 60]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO message_logs (user_id, input_text_hindi, stt_service, stt_confidence, ai_service, ai_model, ai_prompt_tokens, ai_completion_tokens, response_text_english, response_text_hindi, tts_service, tts_audio_url, delivery_status, created_at) VALUES ((SELECT user_id FROM users WHERE phone_number = '{{ $json.sender_phone }}' LIMIT 1), '{{ $json.hindi_text }}', 'google_cloud', {{ $json.stt_confidence }}, 'openai_gpt51', 'gpt-5.1-instant', {{ $json.prompt_tokens }}, {{ $json.completion_tokens }}, '{{ $json.english_response }}', '{{ $json.hindi_response }}', 'google_cloud', '{{ $json.audio_url }}', 'sent', NOW())"
+      },
+      "name": "Log Interaction",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [4250, 60]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $env.WHATSAPP_PHONE_ID }}",
+        "toNumber": "={{ $json.sender_phone }}",
+        "type": "interactive",
+        "interactiveObject": {
+          "type": "button",
+          "body": { "text": "क्या मेरा जवाब सही था?" },
+          "action": {
+            "buttons": [
+              { "type": "reply", "reply": { "id": "yes_feedback", "title": "👍 हाँ" } },
+              { "type": "reply", "reply": { "id": "no_feedback", "title": "👎 नहीं" } },
+              { "type": "reply", "reply": { "id": "more_help", "title": "और मदद" } }
+            ]
+          }
+        }
+      },
+      "name": "Send Feedback Buttons",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [4450, 60]
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": { "main": [ [ { "node": "Extract WhatsApp Data", "type": "main", "index": 0 } ] ] },
+    "Extract WhatsApp Data": { "main": [ [ { "node": "IF Audio", "type": "main", "index": 0 } ] ] },
+    "IF Audio": { "main": [ [ { "node": "Get Audio URL", "type": "main", "index": 0 } ], [ { "node": "Send Feedback Buttons", "type": "main", "index": 0 } ] ] },
+    "Get Audio URL": { "main": [ [ { "node": "Download Audio", "type": "main", "index": 0 } ] ] },
+    "Download Audio": { "main": [ [ { "node": "Google STT (hi-IN)", "type": "main", "index": 0 } ] ] },
+    "Google STT (hi-IN)": { "main": [ [ { "node": "Extract STT Results", "type": "main", "index": 0 } ] ] },
+    "Extract STT Results": { "main": [ [ { "node": "DeepL HI→EN", "type": "main", "index": 0 } ] ] },
+    "DeepL HI→EN": { "main": [ [ { "node": "Extract English Text", "type": "main", "index": 0 } ] ] },
+    "Extract English Text": { "main": [ [ { "node": "Query User Context", "type": "main", "index": 0 } ] ] },
+    "Query User Context": { "main": [ [ { "node": "Build System Prompt", "type": "main", "index": 0 } ] ] },
+    "Build System Prompt": { "main": [ [ { "node": "GPT-5.1 Instant", "type": "main", "index": 0 } ] ] },
+    "GPT-5.1 Instant": { "main": [ [ { "node": "Extract LLM Response", "type": "main", "index": 0 } ] ] },
+    "Extract LLM Response": { "main": [ [ { "node": "DeepL EN→HI", "type": "main", "index": 0 } ] ] },
+    "DeepL EN→HI": { "main": [ [ { "node": "Extract Hindi Response", "type": "main", "index": 0 } ] ] },
+    "Extract Hindi Response": { "main": [ [ { "node": "Google TTS (hi-IN)", "type": "main", "index": 0 } ] ] },
+    "Google TTS (hi-IN)": { "main": [ [ { "node": "Extract Audio Content", "type": "main", "index": 0 } ] ] },
+    "Extract Audio Content": { "main": [ [ { "node": "Upload Audio to GCS", "type": "main", "index": 0 } ] ] },
+    "Upload Audio to GCS": { "main": [ [ { "node": "Construct Public URL", "type": "main", "index": 0 } ] ] },
+    "Construct Public URL": { "main": [ [ { "node": "Send Voice to WhatsApp", "type": "main", "index": 0 } ] ] },
+    "Send Voice to WhatsApp": { "main": [ [ { "node": "Log Interaction", "type": "main", "index": 0 }, { "node": "Send Feedback Buttons", "type": "main", "index": 0 } ] ] }
+  },
+  "active": false,
+  "settings": {}
+}

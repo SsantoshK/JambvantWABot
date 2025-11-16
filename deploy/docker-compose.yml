@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-jambvant_user}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+      POSTGRES_DB: "${POSTGRES_DB:-jambvant_db}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jambvant_net
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678" # change if you place behind a reverse proxy
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-jambvant_db}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-jambvant_user}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-admin_password}
+      - WEBHOOK_URL=${WEBHOOK_URL:-https://jambvant.com}
+      - VUE_APP_URL_BASE_API=${VUE_APP_URL_BASE_API:-https://jambvant.com}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+    networks:
+      - jambvant_net
+
+  adminer:
+    image: adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - jambvant_net
+
+volumes:
+  postgres_data:
+  n8n_data:
+
+networks:
+  jambvant_net:
+    driver: bridge
