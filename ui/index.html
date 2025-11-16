@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="hi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Jambvant — WhatsApp Audio Chat UI (Prototype)</title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
+      .container { max-width: 720px; margin: 0 auto; }
+      .record { margin-top: 20px; }
+      button { padding: 10px 16px; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Jambvant — WhatsApp Audio Chat (UI prototype)</h1>
+      <p>This is a minimal prototype UI showing how users could record and send Hindi audio to the bot.</p>
+
+      <div class="record">
+        <audio id="player" controls></audio>
+        <div>
+          <button id="start">Start Recording</button>
+          <button id="stop" disabled>Stop</button>
+        </div>
+      </div>
+
+      <p class="notes">Note: This prototype only demonstrates client-side recording. Integrate with your backend to upload audio to WhatsApp or your media endpoint.</p>
+    </div>
+
+    <script>
+      let mediaRecorder, chunks = [];
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+      const player = document.getElementById('player');
+
+      startBtn.onclick = async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'audio/ogg; codecs=opus' });
+          chunks = [];
+          player.src = URL.createObjectURL(blob);
+        };
+        mediaRecorder.start();
+        startBtn.disabled = true; stopBtn.disabled = false;
+      };
+
+      stopBtn.onclick = () => {
+        mediaRecorder.stop();
+        startBtn.disabled = false; stopBtn.disabled = true;
+      };
+    </script>
+  </body>
+</html>
