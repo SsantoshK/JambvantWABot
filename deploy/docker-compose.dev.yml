@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-jambvant_user}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+      POSTGRES_DB: "${POSTGRES_DB:-jambvant_db}"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - jambvant_net
+
+  n8n_dev:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5679:5678" # dev instance binds to 5679 on host
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-jambvant_db}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-jambvant_user}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5679}
+      - VUE_APP_URL_BASE_API=${VUE_APP_URL_BASE_API:-http://localhost:5679}
+    volumes:
+      - n8n_dev_data:/home/node/.n8n
+    depends_on:
+      - postgres
+    networks:
+      - jambvant_net
+
+  adminer:
+    image: adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080" # avoid collision with prod compose
+    networks:
+      - jambvant_net
+
+volumes:
+  postgres_dev_data:
+  n8n_dev_data:
+
+networks:
+  jambvant_net:
+    driver: bridge
+
+# Usage: from `deploy/` run `docker compose -f docker-compose.dev.yml up --build`
+# This creates an isolated dev n8n at http://localhost:5679 using separate volumes.
