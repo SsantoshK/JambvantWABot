@@ -26,3 +26,24 @@ Production n8n
 If you want a local/dev instance instead of the production instance, I can:
  - Add a `docker-compose.dev.yml` with a namespaced `n8n_dev` service and separate volumes/ports, or
  - Provide step-by-step instructions to run a local workflow import into your remote n8n instance.
+
+Dev: running a local/dev instance
+
+- Use the included `deploy/docker-compose.dev.yml` to run an isolated dev environment (separate volumes and ports).
+
+  From `deploy/` run:
+  ```bash
+  docker compose -f docker-compose.dev.yml up --build -d
+  # n8n dev UI will be available at http://localhost:5679 (or use the host IP)
+  ```
+
+- To import the workflow into n8n (UI):
+  1. Open your n8n instance (remote or local) and go to Workflows → Import.
+  2. Upload `n8n/jambvant_n8n_workflow.json`.
+
+- Environment variables used by the workflow (ensure they are configured in n8n credentials or env):
+  - `GOOGLE_API_KEY` — Google Cloud Speech and TTS
+  - `GCS_BUCKET_NAME` — Google Cloud Storage bucket for audio
+  - `WHATSAPP_PHONE_ID` — WhatsApp Cloud API phone ID
+
+If you'd like, I can also wire these to n8n credential objects in the exported JSON (replace `{{ $env.* }}` with credential references) or provide sample `.env` values for the dev compose file.
